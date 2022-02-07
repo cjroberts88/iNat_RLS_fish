@@ -1,0 +1,798 @@
+#Figure 1 - map with pie charts showing species recorded by iNat only, RLS only or Both Datasets
+
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+#install.packages("scatterpie")
+library(scatterpie)
+
+library(ggrepel)
+library(sf)
+
+
+# Calculate species recorded by both iNat and RLS
+iNat_RLS <- read.csv("Data/iNat_RLS.csv", header=TRUE)
+
+iNat_RLS_SumSite_Bth  <- iNat_RLS  %>% 
+    select(Species, Pres, Site, Dataset)  %>% 
+    distinct()  %>% 
+    group_by(Site, Species) %>%
+    summarise(Pres = sum(Pres))
+
+iNat_RLS_SumSite_Bth$Dataset <- "Both"
+iNat_RLS_SumSite_Bth$Pres <- sub("1","0",iNat_RLS_SumSite_Bth$Pres)
+iNat_RLS_SumSite_Bth$Pres <- sub("2","1",iNat_RLS_SumSite_Bth$Pres)
+
+iNat_red_exYr  <- iNat_RLS  %>% 
+  filter(Dataset=="iNat")  %>% 
+    select(Species, Pres, Site, Dataset)  %>% 
+    distinct() 
+
+RLS_red_exYr  <- iNat_RLS  %>% 
+  filter(Dataset=="RLS")  %>% 
+    select(Species, Pres, Site, Dataset)  %>% 
+    distinct() 
+
+iNat_RLS_SumSite_Bth$Pres <- as.numeric(iNat_RLS_SumSite_Bth$Pres)
+
+iNat_RLS_SumSite_Tot <- bind_rows(iNat_RLS_SumSite_Bth, iNat_red_exYr, RLS_red_exYr)
+
+iNat_RLS_SumSite_Sum <- iNat_RLS_SumSite_Tot  %>% 
+    group_by(Site, Dataset) %>%
+    summarise(Total = sum(Pres))
+
+iNat_RLS_SumSite_Sum_Spread <- spread(iNat_RLS_SumSite_Sum, Dataset, Total)
+iNat_RLS_SumSite_Sum_Spread[is.na(iNat_RLS_SumSite_Sum_Spread)] <- 0
+iNat_RLS_SumSite_Sum_Spread$iNat_unique <- iNat_RLS_SumSite_Sum_Spread$iNat-iNat_RLS_SumSite_Sum_Spread$Both
+iNat_RLS_SumSite_Sum_Spread$RLS_unique <- iNat_RLS_SumSite_Sum_Spread$RLS-iNat_RLS_SumSite_Sum_Spread$Both
+iNat_RLS_SumSite_Sum_unq <- select(iNat_RLS_SumSite_Sum_Spread, Site,  Both, RLS_unique, iNat_unique)
+iNat_RLS_SumSite_Sum_unq <- gather(iNat_RLS_SumSite_Sum_unq, Both, RLS_unique, iNat_unique, key=Dataset, value = Total)
+iNat_RLS_SumSite_Sum_unq$Dataset<-factor(iNat_RLS_SumSite_Sum_unq$Dataset, levels = c("iNat_unique", "RLS_unique", "Both"))
+
+iNat_RLS_SumSite_Sum_unq$Year <- "Total"
+
+iNat_RLS_SumSite_Sum_unq$Site <- factor(iNat_RLS_SumSite_Sum_unq$Site, levels = c("Clifton Gardens", "Kurnell", "Shiprock","Shelly Beach", "Camp Cove", "Bare Island",  "Gordons Bay", "Oak Park"))
+
+# create the map
+
+
+aus <- read_sf("Data/aust_cd66states.shp")
+
+#random points dataframe to cover the random stars plotting on the map.. channel markers?
+blockout <- data.frame(Lat=c(-33.839462, -33.9914, -33.832),
+           Long=c(151.315, 151.185, 151.292))
+
+site_coords <- data.frame(Site=c("Camp Cove", "Bare Island", "Shelly Beach", "Kurnell", "Shiprock", "Clifton Gardens", "Gordons Bay", "Oak Park"),
+           Lat=c(-33.839462, -33.986114, -33.800491, -34.004803, -34.069222, -33.840133,-33.91537,-34.07022),
+           Long=c(151.278486, 151.232260, 151.297299, 151.225942, 151.129858, 151.253429, 151.2674, 151.159))
+
+
+
+iNat_RLS_SumSite_Sum_unq_coord <- left_join(iNat_RLS_SumSite_Sum_unq, site_coords)
+
+
+iNat_RLS_SumSite_Sum_unq_coord_wide <- pivot_wider(iNat_RLS_SumSite_Sum_unq_coord, names_from=Dataset, values_from=Total)
+iNat_RLS_SumSite_Sum_unq_coord_wide$Total <-  iNat_RLS_SumSite_Sum_unq_coord_wide$Both+iNat_RLS_SumSite_Sum_unq_coord_wide$RLS_unique+iNat_RLS_SumSite_Sum_unq_coord_wide$iNat_unique
+
+rls_inat_syd_map_pie <- ggplot()+
+  geom_sf(data=aus, fill="gray98")+
+  theme_bw()+
+  #random points to block stars/triangles off map
+  geom_point(aes(x=Long, y=Lat), data=blockout, colour='white', size=4)+
+    
+  geom_scatterpie(aes(x=Long, y=Lat, group=Site, r=Total/12000), data=iNat_RLS_SumSite_Sum_unq_coord_wide,                                
+                 cols=c("Both", "iNat_unique", "RLS_unique"), color=NA, alpha = 0.92) + 
+theme(panel.grid.major=element_line(color="transparent"))+
+  xlab("")+
+  ylab("")+
+  xlim(151.0, 151.4)+
+  ylim(-34.1, -33.7)+
+  coord_sf()+
+ geom_text(data = iNat_RLS_SumSite_Sum_unq_coord_wide, aes(x = Long, y = Lat, label = Site),nudge_x = c(0.07, 0.06, 0.095, 0.065, 0.037, 0.05, 0.059, 0.067), 
+                nudge_y = c(0 ,0, -0.02, 0, -0.01,0,0.03,0.019))+
+   theme(legend.position = c(0.85, 0.13), legend.title = element_blank())+
+   theme(text = element_text(size=12))+
+  scale_fill_manual(values=c('#656565',"#A2E7F2", "#F98C3E"),labels=c ('Both', 'iNaturalist', 'RLS'))
+ 
+
+rls_inat_syd_map_pie
+
+#Australian map added outside R
+```
+
+
+
+#Figure 2 - species richness per year & species accumulation curve
+
+```{r}
+# Caclculate number of species per year
+iNat_RLS_Comm.Fac_12yrs <- read.csv("Data/iNat_RLS_Comm_Fac_12yrs.csv")
+
+iNat_RLS_sppR_12yrs <-iNat_RLS_Comm.Fac_12yrs
+
+
+iNat_RLS_sppR_12yrs$SppR <- rowSums(iNat_RLS_sppR_12yrs[,4:457] )
+iNat_RLS_sppR_12yrs <- select(iNat_RLS_sppR_12yrs, Year, Site, Dataset,  SppR)
+iNat_RLS_sppR_12yrs$Site_Data <- paste(iNat_RLS_sppR_12yrs$Site, iNat_RLS_sppR_12yrs$Dataset, sep = "_")
+
+# calculate species accumulation curves
+
+library(BiodiversityR)
+
+iNat_RLS_Comm_FacTab <- iNat_RLS_Comm.Fac_12yrs[1:3]
+iNat_RLS_Comm_FacTab$SppR <- iNat_RLS_sppR_12yrs$SppR
+iNat_RLS_Comm_FacTab$Site_Data <- paste(iNat_RLS_Comm_FacTab$Site, iNat_RLS_Comm_FacTab$Dataset, sep = "_")
+
+
+#Add years with no data to factors table
+iNat_RLS_Comm_allYrs_FacTab<- spread(iNat_RLS_Comm_FacTab,  Year,SppR)
+iNat_RLS_Comm_allYrs_FacTab[is.na(iNat_RLS_Comm_allYrs_FacTab)] <- 0
+iNat_RLS_Comm_allYrs_FacTab <- gather(iNat_RLS_Comm_allYrs_FacTab,  key=Year, value = SppR,'2008', '2009','2010','2011', '2012','2013', '2014', '2015','2016', '2017', '2018','2019')
+iNat_RLS_Comm_allYrs_FacTab$Year <- as.numeric(iNat_RLS_Comm_allYrs_FacTab$Year)
+
+#Add years with no data to community table 
+iNat_RLS_Comm.Fac_allYrs <- right_join(iNat_RLS_Comm.Fac_12yrs, iNat_RLS_Comm_allYrs_FacTab)
+iNat_RLS_Comm.Fac_allYrs[is.na(iNat_RLS_Comm.Fac_allYrs)] <- 0 
+
+iNat_RLS_Comm_allYrs <- iNat_RLS_Comm.Fac_allYrs[4:457]
+iNat_RLS_Comm_allYrs_FacTab <- iNat_RLS_Comm.Fac_allYrs[,c(1,2,3,458,459)]
+
+
+
+
+Spp_accum_allYrs_coll <- accumcomp(iNat_RLS_Comm_allYrs, y=iNat_RLS_Comm_allYrs_FacTab, factor='Site_Data', xlab="Year",  method="collector", legend=FALSE)
+
+
+Spp_accum_allYrs_coll_gg <- as.data.frame(Spp_accum_allYrs_coll)
+Spp_accum_allYrs_coll_gg <- add_rownames(Spp_accum_allYrs_coll_gg, "Si_So")
+
+Spp_accum_allYrs_coll_gg <- Spp_accum_allYrs_coll_gg %>%
+  gather(key, value, -Si_So) %>%
+  separate(key,into=c("Year","Data"))%>%
+  spread(Data, value)%>%
+  separate(Si_So,into=c("Site","Dataset"), sep="_")
+
+Spp_accum_allYrs_coll_gg$Site <- factor(Spp_accum_allYrs_coll_gg$Site, levels = c("Clifton Gardens", "Shiprock", "Kurnell","Shelly Beach", "Camp Cove", "Bare Island", "Fairlight","Gordons Bay", "Oak Park"))
+
+Spp_accum_allYrs_coll_gg$Year<-as.numeric(Spp_accum_allYrs_coll_gg$Year)  
+ Spp_accum_allYrs_coll_gg$Year <- (Spp_accum_allYrs_coll_gg$Year + 2007)
+Spp_accum_allYrs_coll_gg$Year<-as.character(Spp_accum_allYrs_coll_gg$Year)  
+
+iNat_RLS_sppR_12yrs$Year<-as.character(iNat_RLS_sppR_12yrs$Year)  
+
+# create combined plot of sppR/Yr and species accumulation curves
+
+ggplot() +
+  theme_bw()+
+  theme(panel.grid = element_line(colour = "NA"))+
+   geom_col(data=iNat_RLS_sppR_12yrs, aes(Year, SppR, fill= Dataset, group = Dataset), width=0.7,position=position_dodge(preserve='single'))+
+    facet_wrap(~ Site, ncol = 2) +
+  geom_line(data=Spp_accum_allYrs_coll_gg, aes(Year, Richness, colour = Dataset, group = Dataset), size=0.7) +
+  scale_colour_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset",guide='legend', labels=c("iNaturalist", "RLS"))+
+  labs(y= "Species Richness") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.4)) +
+  theme(text = element_text(size=12))+
+ scale_y_continuous(breaks=seq(0, 400, 50), expand = c(0, 0), limits = c(0, 400)) +
+   theme(legend.position = c(0.856, 0.94), legend.title = element_blank())+
+  #scale_x_continuous(breaks=seq(2017, 2019, 1))+
+    scale_fill_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset",guide='legend', labels=c("iNaturalist", "RLS"))
+
+```
+
+
+
+
+#Section 3.2 species composition 
+# Supplimentary Material 3 - GLLVM ordination plot
+```{r}
+
+
+#Create  community matrix including Factors
+iNat_RLS_Comm.Fac <- spread(iNat_RLS, Species, Pres, fill = 0, convert = FALSE, drop = TRUE,
+  sep = NULL)
+#Create Site_Year_Dataset Row label
+iNat_RLS_Comm <- unite(iNat_RLS_Comm.Fac, Site, Year, Dataset, col="Site_Yr_Data",sep="_")
+iNat_RLS_Comm<- column_to_rownames(iNat_RLS_Comm, var = "Site_Yr_Data")
+
+
+
+# gllvm test
+
+
+library(gllvm)
+
+iNat_RLS_gllvm <-gllvm(iNat_RLS_Comm,num.lv=2,family=binomial(link=cloglog), row.eff="random")
+
+
+# Check Assumptions - residuals
+plot (iNat_RLS_gllvm)
+
+
+# Create ordination plot - Supplementary Material 3
+
+
+gllvm_lvls<-as.data.frame(iNat_RLS_gllvm$lvs) 
+
+gllvm_lvls<- cbind(gllvm_lvls,iNat_RLS_Comm.Fac$Site)
+gllvm_lvls<- cbind(gllvm_lvls,iNat_RLS_Comm.Fac$Dataset)
+gllvm_lvls <- rename(gllvm_lvls, Site='iNat_RLS_Comm.Fac$Site')
+gllvm_lvls <- rename(gllvm_lvls,Dataset='iNat_RLS_Comm.Fac$Dataset')
+
+ggplot(gllvm_lvls, aes(x=LV1, y=LV2, color = iNat_RLS_Comm.Fac$Dataset,shape=iNat_RLS_Comm.Fac$Site)) + 
+  geom_point(size=4.5, stroke = 1.5) + 
+  theme_bw() +
+  theme(panel.grid = element_blank())+
+  theme(legend.key.size = unit(.9, "cm")) +
+    scale_shape_manual(values = c(3,18,7, 16, 4,8,17,15), name  ="Site")  + 
+  scale_colour_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset",guide='legend', labels=c("iNaturalist", "RLS"))
+```
+
+#testing differences in community composition - mvabund test - Section 3.2 
+```{r}
+library(mvabund)
+
+
+iNat_RLS_mvabund <-  mvabund(iNat_RLS_Comm.Fac[,4:374])
+
+
+iNat_RLS_Comm_Facs <- iNat_RLS_Comm.Fac[,1:3]
+iNat_RLS_Comm_Facs$Dataset <- as.factor(iNat_RLS_Comm_Facs$Dataset)
+iNat_RLS_Comm_Facs$Site <- as.factor(iNat_RLS_Comm_Facs$Site)
+iNat_RLS_Comm_Facs$Year <- as.numeric(iNat_RLS_Comm_Facs$Year)
+
+
+#Many GLM by Site
+
+iNat_RLS_manyglm_SixDa_Yr <- manyglm(iNat_RLS_mvabund~Site*Dataset+Year, data=iNat_RLS_Comm_Facs, family=binomial("cloglog"))
+
+
+iNat_RLS_SixDa_Yr_ANOVA <- anova(iNat_RLS_manyglm_SixDa_Yr, p.uni="adjusted", test="LR", cor.type = "I", nBoot=1000)
+
+
+iNat_RLS_SixDa_Yr_ANOVA
+
+```
+
+#Comparison of datasets for each site - pairwise tests
+
+```{r}
+Shelly_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Shelly Beach')
+Shelly_Facs <- Shelly_Comm.Fac[1:3]
+Shelly_Comm.Fac.subset = Shelly_Comm.Fac[4:374]
+Shelly_Comm.Fac.colSum = apply(Shelly_Comm.Fac.subset , 2, sum)
+Shelly_Comm.Fac.subset = Shelly_Comm.Fac.subset [,which(Shelly_Comm.Fac.colSum >0)]
+Shelly_mvabund <-  mvabund(Shelly_Comm.Fac.subset)
+
+Shelly_manyglm <- manyglm(Shelly_mvabund~Dataset + Year, data=Shelly_Facs, family=binomial("cloglog"))
+
+Shelly_ANOVA <- anova(Shelly_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+Shelly_ANOVA_uni <- anova(Shelly_manyglm,  nBoot=1000,  p.uni="adjusted", test="LR", cor.type = "I")
+
+
+Bare_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Bare Island')
+Bare_Facs <- Bare_Comm.Fac[1:3]
+Bare_Comm.Fac.subset = Bare_Comm.Fac[4:374]
+Bare_Comm.Fac.colSum = apply(Bare_Comm.Fac.subset , 2, sum)
+Bare_Comm.Fac.subset = Bare_Comm.Fac.subset [,which(Bare_Comm.Fac.colSum >0)]
+Bare_mvabund <-  mvabund(Bare_Comm.Fac.subset)
+
+Bare_manyglm <- manyglm(Bare_mvabund~Dataset+ Year, data=Bare_Facs, family=binomial("cloglog"))
+
+Bare_ANOVA <- anova(Bare_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+Camp_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Camp Cove')
+Camp_Facs <- Camp_Comm.Fac[1:3]
+Camp_Comm.Fac.subset = Camp_Comm.Fac[4:374]
+Camp_Comm.Fac.colSum = apply(Camp_Comm.Fac.subset , 2, sum)
+Camp_Comm.Fac.subset = Camp_Comm.Fac.subset [,which(Camp_Comm.Fac.colSum >0)]
+Camp_mvabund <-  mvabund(Camp_Comm.Fac.subset)
+
+Camp_manyglm <- manyglm(Camp_mvabund~Dataset+ Year, data=Camp_Facs, family=binomial("cloglog"))
+
+Camp_ANOVA <- anova(Camp_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+
+Clifton_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Clifton Gardens')
+Clifton_Facs <- Clifton_Comm.Fac[1:3]
+Clifton_Comm.Fac.subset = Clifton_Comm.Fac[4:374]
+Clifton_Comm.Fac.colSum = apply(Clifton_Comm.Fac.subset , 2, sum)
+Clifton_Comm.Fac.subset = Clifton_Comm.Fac.subset [,which(Clifton_Comm.Fac.colSum >0)]
+Clifton_mvabund <-  mvabund(Clifton_Comm.Fac.subset)
+
+Clifton_manyglm <- manyglm(Clifton_mvabund~Dataset+ Year, data=Clifton_Facs, family=binomial("cloglog"))
+
+Clifton_ANOVA <- anova(Clifton_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+Gordons_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Gordons Bay')
+Gordons_Facs <- Gordons_Comm.Fac[1:3]
+Gordons_Comm.Fac.subset = Gordons_Comm.Fac[4:374]
+Gordons_Comm.Fac.colSum = apply(Gordons_Comm.Fac.subset , 2, sum)
+Gordons_Comm.Fac.subset = Gordons_Comm.Fac.subset [,which(Gordons_Comm.Fac.colSum >0)]
+Gordons_mvabund <-  mvabund(Gordons_Comm.Fac.subset)
+
+Gordons_manyglm <- manyglm(Gordons_mvabund~Dataset+ Year, data=Gordons_Facs, family=binomial("cloglog"))
+
+Gordons_ANOVA <- anova(Gordons_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+
+Oak_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Oak Park')
+Oak_Facs <- Oak_Comm.Fac[1:3]
+Oak_Comm.Fac.subset = Oak_Comm.Fac[4:374]
+Oak_Comm.Fac.colSum = apply(Oak_Comm.Fac.subset , 2, sum)
+Oak_Comm.Fac.subset = Oak_Comm.Fac.subset [,which(Oak_Comm.Fac.colSum >0)]
+Oak_mvabund <-  mvabund(Oak_Comm.Fac.subset)
+
+Oak_manyglm <- manyglm(Oak_mvabund~Dataset+ Year, data=Oak_Facs, family=binomial("cloglog"))
+
+Oak_ANOVA <- anova(Oak_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+Shiprock_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Shiprock')
+Shiprock_Facs <- Shiprock_Comm.Fac[1:3]
+Shiprock_Comm.Fac.subset = Shiprock_Comm.Fac[4:374]
+Shiprock_Comm.Fac.colSum = apply(Shiprock_Comm.Fac.subset , 2, sum)
+Shiprock_Comm.Fac.subset = Shiprock_Comm.Fac.subset [,which(Shiprock_Comm.Fac.colSum >0)]
+Shiprock_mvabund <-  mvabund(Shiprock_Comm.Fac.subset)
+
+Shiprock_manyglm <- manyglm(Shiprock_mvabund~Dataset+ Year, data=Shiprock_Facs, family=binomial("cloglog"))
+
+Shiprock_ANOVA <- anova(Shiprock_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+Kurnell_Comm.Fac <- filter(iNat_RLS_Comm.Fac, Site =='Kurnell')
+Kurnell_Facs <- Kurnell_Comm.Fac[1:3]
+Kurnell_Comm.Fac.subset = Kurnell_Comm.Fac[4:374]
+Kurnell_Comm.Fac.colSum = apply(Kurnell_Comm.Fac.subset , 2, sum)
+Kurnell_Comm.Fac.subset = Kurnell_Comm.Fac.subset [,which(Kurnell_Comm.Fac.colSum >0)]
+Kurnell_mvabund <-  mvabund(Kurnell_Comm.Fac.subset)
+
+Kurnell_manyglm <- manyglm(Kurnell_mvabund~Dataset+ Year, data=Kurnell_Facs, family=binomial("cloglog"))
+
+Kurnell_ANOVA <- anova(Kurnell_manyglm,  nBoot=1000, test="LR", cor.type = "I")
+
+
+
+Shelly_ANOVA
+Bare_ANOVA
+Camp_ANOVA
+Clifton_ANOVA
+Gordons_ANOVA
+Oak_ANOVA
+Shiprock_ANOVA
+Kurnell_ANOVA
+```
+
+
+
+
+# Figure 3 - Bi-directional Bar plots of species occurence
+Based on significant species from ANOVA univariate tests 
+
+```{r}
+iNat_RLS_SixDa_ANOVA_uni <- as.data.frame(iNat_RLS_SixDa_Yr_ANOVA$uni.p)
+iNat_RLS_SixDa_ANOVA_uni <- iNat_RLS_SixDa_ANOVA_uni[-1, ]
+
+iNat_RLS_SixDa_ANOVA_uni <- rownames_to_column(iNat_RLS_SixDa_ANOVA_uni, var="Variable")
+
+
+colnames(iNat_RLS_SixDa_ANOVA_uni) <- gsub("\\.", " ", colnames(iNat_RLS_SixDa_ANOVA_uni))
+
+
+iNat_RLS_SppTot_Dataset <- iNat_RLS_Comm.Fac %>%
+  select(3:370)  %>%
+  group_by(Dataset) %>%
+  summarise_all(sum)%>%
+rename(Variable=Dataset)
+
+colnames(iNat_RLS_SppTot_Dataset) <- gsub("\\.", " ", colnames(iNat_RLS_SppTot_Dataset))
+
+#Join uni pvalues to count data
+iNat_RLS_SixDa_ANOVA_uni_counts <-bind_rows(iNat_RLS_SixDa_ANOVA_uni,iNat_RLS_SppTot_Dataset)
+
+
+
+iNat_RLS_SixDa_ANOVA_uni_counts <-column_to_rownames(iNat_RLS_SixDa_ANOVA_uni_counts, var="Variable")
+
+iNat_RLS_SixDa_ANOVA_uni_counts <- as.data.frame(t(iNat_RLS_SixDa_ANOVA_uni_counts))
+
+
+# Filter to Dataset <0.05 (i.e. significant diff between Datasets)
+iNat_RLS_SixDa_ANOVA_uni_counts <-rownames_to_column(iNat_RLS_SixDa_ANOVA_uni_counts, var="Species")
+iNat_RLS_SixDa_ANOVA_uni_sig_data  <- filter(iNat_RLS_SixDa_ANOVA_uni_counts, Dataset < 0.05)
+
+
+# Conver iNat v RLS into +- Counts  for bi directionality of plot
+
+iNat_RLS_SixDa_ANOVA_uni_sig_data <- select(iNat_RLS_SixDa_ANOVA_uni_sig_data, Species, iNat, RLS)
+iNat_RLS_SixDa_ANOVA_uni_sig_data <- gather(iNat_RLS_SixDa_ANOVA_uni_sig_data, iNat, RLS, key=Dataset,value='Counts')
+
+
+#bidirectional plot with fish silhouettes 
+#unhash to install fisualize if required
+#library(devtools)
+#devtools::install_github("nschiett/fishualize", force = TRUE)
+library(fishualize)
+
+sig_species_bar_fishpics <- ggplot(data = iNat_RLS_SixDa_ANOVA_uni_sig_data, 
+       mapping = aes(x = reorder(Species, Counts, diff), fill = Dataset, 
+                     y = ifelse(test = Dataset == "RLS", 
+                                yes = -Counts, no = Counts))) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = abs, limits = max(iNat_RLS_SixDa_ANOVA_uni_sig_data$Counts) * c(-1,1.2)) +
+  labs(y = "Number of Records") +
+  coord_flip() +
+  theme_bw() +
+  theme(panel.grid = element_line(colour = "NA"), axis.text.y = element_text(face="italic", size=8),axis.text.x = element_text(size=12),axis.title.x = element_text(size=12), axis.title.y = element_blank()) +
+  scale_fill_manual(values=c("#A2E7F2", "#F98C3E"), name  ="Dataset",breaks=c("iNat", "RLS"), labels=c("iNaturalist", "RLS"))+
+  theme(text = element_text(size=12))+
+   theme(legend.position = c(0.19, 0.15), legend.title = element_blank())+
+
+### Code below adds fish shapes - may plot in wrong position depending on the number of significant species returned in ANOVA uni tests
+  ### Some fish families were not loading correctly so were added manually. 
+ add_fishape(family = "Tripterygiidae",
+            option = "Helcogramma_fuscopinna",
+              xmin = 17.5, xmax = 18.5, ymin = 5, ymax = 10,
+              fill = "black",
+              alpha = 1) +
+
+add_fishape(family = "Pomacentridae",
+             option = "Abudefduf_sexfasciatus",
+             xmin = 16.5, xmax = 17.5, ymin = 8, ymax = 13,
+              fill = "black",
+              alpha = 1) +
+  
+#   add_fishape(family = "Cheilodactylidae",
+#   option = "Cheilodactylus_fuscus",
+#   xmin = 15.5, xmax = 16.5, ymin = 18, ymax = 22,
+#   fill = "black",
+#   alpha = 1)+
+  
+add_fishape(family = "Syngnathidae",
+            option = "Syngnathus_sp",
+                     xmin = 15.5, xmax = 16.5, ymin = 8, ymax = 16,
+              fill = "black",
+              alpha = 1) +
+
+add_fishape(family = "Blenniidae",
+            option = "Antennablennius_adenensis",
+                     xmin = 14.5, xmax = 15.5, ymin = 9, ymax = 15,
+              fill = "black",
+              alpha = 1) +
+
+##add_fishape(family = "Platycephalidae",
+##   option = "Thysanophrys_cirronasa",
+##                    xmin = 13.5, xmax = 14.5, ymin = 10, ymax = 16,
+##              fill = "black",
+##             alpha = 1) +
+  
+  add_fishape(family = "Tetraodontidae",
+            option = "Arothron_meleagris",
+                     xmin = 12.5, xmax = 13.5, ymin = 10, ymax = 16,
+              fill = "black",
+              alpha = 1) +
+
+add_fishape(family = "Syngnathidae",
+            option = "Syngnathus_sp",
+                     xmin = 11.5, xmax = 12.5, ymin = 11, ymax = 19,
+              fill = "black",
+              alpha = 1) +
+  
+  add_fishape(family = "Syngnathidae",
+            option = "Syngnathus_sp",
+                     xmin = 10.5, xmax = 11.5, ymin = 11, ymax = 19,
+             fill = "black",
+              alpha = 1) +
+
+    add_fishape(family = "Dasyatidae",
+            option = "Bathytoshia_brevicaudata",
+                     xmin = 9.5, xmax = 10.8, ymin = 11, ymax = 14,
+              fill = "black",
+              alpha = 1) +
+  
+
+add_fishape(family =  "Kyphosidae",
+              option = "Kyphosus_cinerascens",
+                     xmin = 8.2, xmax = 9.7, ymin = 20, ymax = 24,
+              fill = "black",
+              alpha = 1) +
+
+add_fishape(family =  "Hypnidae",
+   option = "Hypnos_monopterygius", 
+                    xmin = 7.2, xmax = 8.8, ymin = 12, ymax = 15,
+              fill = "black",
+             alpha = 1) +
+
+  add_fishape(family =  "Urolophidae",
+ option = "Trygonoptera_testacea",
+                     xmin = 6.2, xmax = 7.8, ymin = 13, ymax = 16,
+              fill = "black",
+             alpha = 1) +
+  
+    add_fishape(family =  "Labridae",
+              option = "Coris_gaimard",
+                     xmin = 5.5, xmax = 6.5, ymin = 13, ymax = 17,
+              fill = "black",
+              alpha = 1) +
+  
+# #   add_fishape(family =  "Scorpaenidae",
+##            option = "Pterois_volitans",
+# #                    xmin = 4.5, xmax = 6.5, ymin = 15, ymax = 25,
+#  #            fill = "black",
+#   #           alpha = 1) +
+  
+##  add_fishape(family = "Platycephalidae",
+# #  option = "Thysanophrys_cirronasa",
+#  #                  xmin = 3.5, xmax = 4.5, ymin = 16, ymax = 22,
+#   #           fill = "black",
+#    #         alpha = 1) +
+
+# #   add_fishape(family = "Heterodontidae",
+# #  option = "Heterodontus_portusjacksoni",
+# #                   xmin = 2.5, xmax = 3.5, ymin = 16, ymax = 22,
+# #            fill = "black",
+# #           alpha = 1) +
+      
+      add_fishape(family = "Diodontidae",
+   option = "Dicotylichthys_punctulatus",
+                    xmin = 1.5, xmax = 2.5, ymin = 19, ymax = 24,
+              fill = "black",
+             alpha = 1) +
+  
+    #technically not the right family -> should be Aracanidae
+    add_fishape(family =  "Ostraciidae",
+              option = "Ostracion_cubicus",
+                     xmin = 0.5, xmax = 1.5, ymin = 17, ymax = 23,
+              fill = "black",
+              alpha = 1) 
+   
+   
+sig_species_bar_fishpics
+
+```
+
+
+
+
+#Figure 4 - iNaturalist photographic observations
+```{r}
+iNat <- read.csv("Data/iNat_Obs.csv", header=TRUE)
+
+#iNat Photo count
+
+iNat_Photo_Count <- select(iNat, Species, Pres, Site, Date)
+iNat_Photo_Count$Date <- as.Date(iNat_Photo_Count$Date)
+iNat_Photo_Count$Date <- format(iNat_Photo_Count$Date, "%Y")
+iNat_Photo_Count <- filter(iNat_Photo_Count, Date>2007)
+iNat_Photo_Count <- filter(iNat_Photo_Count, Date<2020)
+iNat_Photo_Count$Site_Yr <- as.factor(paste(iNat_Photo_Count$Site, iNat_Photo_Count$Date, sep = "_"))
+
+
+iNat_Photo_Count <- iNat_Photo_Count  %>% 
+  group_by(Site_Yr) %>%
+  summarise(Photo_Count = sum(Pres))
+
+iNat_Photo_Count <- separate(iNat_Photo_Count, 1, c("Site", "Year"), sep="_")
+
+
+ggplot(data=iNat_Photo_Count, aes(Year, Photo_Count, colour = Site, group = Site )) +
+  theme_classic() +
+  theme(panel.grid = element_line(colour = "NA"), text=element_text(size=12))+
+     geom_line( size=0.5,show.legend = FALSE) +
+  labs(y= "Photos per Year")+
+  scale_y_log10()+
+    scale_x_discrete(breaks = c(2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019), expand = c(0.03, 0.03))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.4)) +
+theme(legend.position='bottom', legend.title = element_blank(),legend.justification = c(0.9,0.9))+
+  geom_point(aes(shape=Site), size=3, stroke = 1)+
+   theme(text = element_text(size=12))+
+    scale_shape_manual(values = c(3,18,7, 16, 4,8,17,15), name  ='Site') 
+```
+
+# Figure 5 - Number of species per observation event
+```{r}
+RLS_M1 <- read.csv("Data/RLS_M1.csv", header=TRUE)
+RLS_M2 <- read.csv("Data/RLS_M2.csv", header=TRUE)
+
+RLS <- bind_rows(RLS_M1,RLS_M2)
+
+#Create reduce RLS table
+RLS_trans <- select(RLS, Species, Pres, Date,Depth, Site)
+
+RLS_trans$Date <- as.Date(RLS_trans$Date)
+RLS_trans$Pres <- as.integer(RLS_trans$Pres)
+
+
+RLS_trans <- select(RLS_trans, Species, Pres, Date,Depth, Site)
+
+#Remove duplicate species records for a given site and year
+RLS_trans <- distinct(RLS_trans, .keep_all = FALSE)
+
+#Create RLS community table including Factors
+RLS_trans_inc.Fac <- spread(RLS_trans, Species, Pres, fill = 0, convert = FALSE, drop = TRUE,
+  sep = NULL)
+
+# Species/Transect
+sp_trans<-RLS_trans_inc.Fac
+
+sp_trans$Total <-  sp_trans %>%
+  select (4:153) %>%
+  rowSums()
+
+#sp_trans$Year<- format(sp_trans$Date, "%Y")  
+sp_trans$Year <- substr(sp_trans$Date, 0, 4)
+
+
+sp_trans_tab <- sp_trans %>% 
+  group_by(Site) %>% 
+summarise(observations = sum (Total), species_transect = mean(Total), SD = sd(Total), transects=n(), min=min(Total), max=max(Total))
+
+sp_trans_tab$SE <- sp_trans_tab$SD/(sqrt(sp_trans_tab$transects))
+
+# Photographs/Dive
+
+iNat_3yrs <- subset(iNat, Date>="2017-01-01" & Date <="2019-12-31")
+
+Photos_dive <-  iNat_3yrs %>% 
+  group_by(Site, Date, User) %>% 
+summarise(Total = n())
+
+#Photos_dive$Year <- format(Photos_dive$Date, "%Y")    
+Photos_dive$Year <- substr(Photos_dive$Date, 0, 4)
+
+trans_photos <- sp_trans[c(2:3,236:237)]
+trans_photos$Dataset <- 'RLS'
+
+Photos_dive$Dataset <- 'iNat'
+
+trans_photos <- bind_rows(trans_photos,Photos_dive)
+
+
+ggplot(trans_photos, aes(x = Total, fill=Dataset))+  
+    theme_bw()+
+  theme(panel.grid = element_line(colour = "NA"))+
+  geom_histogram( aes(y = 1*..density.. ), binwidth = 1,  position = "identity") +
+  facet_wrap(~ Dataset, ncol = 2) +
+ scale_alpha_manual(values = c(1,  0.5)) +
+  scale_colour_manual(values=c("#82bbc4","#cf7434")) +
+    scale_x_continuous(breaks = c(0,10,20,30,40,50,60,70), expand = c(0.02,0.1)) +
+  scale_y_continuous(breaks = c(0,0.01,0.05,.1,.2,.3,.4,.5), labels = paste0(c(0,0.01,0.05,.1,.2,.3,.4,.5)*100," %"), expand= c(0,0.008),  limits = c(0, 0.5), trans='sqrt') +
+   theme(legend.position = "none")+  
+   labs(y= "Proportion of Events", x="Species Recorded per Observation Event") +
+     theme(text = element_text(size=12))+
+  scale_fill_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset",guide='legend', labels=c("iNaturalist", "RLS") )
+
+
+```
+
+#Supplementary Material 2 - Average species richness plot 
+```{r}
+iNat_RLS_sppR_3yrs <-iNat_RLS_Comm.Fac
+iNat_RLS_sppR_3yrs$SppDiv <- rowSums(iNat_RLS_sppR_3yrs[,4:374] )
+
+avg_rich <- iNat_RLS_sppR_3yrs %>%
+  group_by(Site, Dataset) %>%
+  summarise(mean= mean(SppDiv), sd=sd(SppDiv), n = n_distinct(Year))
+
+avg_rich$SE <- avg_rich$sd/sqrt(avg_rich$n)
+avg_rich$Year <- "Average"
+avg_rich <- rename(avg_rich, SppDiv=mean)
+avg_rich <-select(avg_rich,-sd,-n)
+
+
+my_breaks <- function(y) { if (max(y) < 100) seq(0, 100, 25) else  seq(0, 200, 50)}
+
+ggplot() +
+  theme_bw()+
+  theme(panel.grid = element_line(colour = "NA"))+
+   geom_boxplot(data=iNat_RLS_sppR_3yrs, aes(Dataset, SppDiv, fill= Dataset), width=0.3,position=position_dodge(preserve='single'))+
+   facet_wrap(~ Site, ncol = 2, scales = "free_y")+
+labs(y= "Species Richness") + 
+  #theme(axis.text.x = element_text(angle = 90)) +
+ expand_limits( y = 0)+
+    #scale_y_continuous(breaks=seq(0, 200,50), expand = c(0, 0), limits = c(0, 200)) +
+    scale_fill_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset", labels=c("iNaturalist", "RLS") ) +
+scale_y_continuous(breaks = my_breaks)
+
+
+```
+#ANOVA/Pairwise test for difference in average annual species richness
+```{r}
+#install.packages("afex")
+library(afex)
+
+
+
+iNat_RLS_sppR_3yrs <- select(iNat_RLS_sppR_3yrs, Site, Dataset,  SppDiv)
+
+iNat_RLS_sppR_3yrs <- rownames_to_column(iNat_RLS_sppR_3yrs, "ID")
+
+iNat_RLS_sppR_3yrs$ID <- as.integer (iNat_RLS_sppR_3yrs$ID)
+
+SppR_Anova<-aov_car(SppDiv~Site*Dataset  + Error(ID), 
+                  data=iNat_RLS_sppR_3yrs)
+SppR_Anova
+
+#install.packages("emmeans")
+library(emmeans)
+Simple.Effects.By.Site<-emmeans(SppR_Anova, ~Dataset|Site)
+Simple.Effects.By.Site
+
+
+
+#as F-tests
+test(pairs(Simple.Effects.By.Site), joint = TRUE)
+
+
+
+
+```
+
+
+#Supplementary Material 4 - Effort - Sampling events. Dives/transects
+
+```{r}
+#Create reduce RLS table
+RLS_transect_year <- select(RLS, Date, Depth, Site)
+
+#Remove duplicate species records for a given site and year
+RLS_transect_year <- distinct(RLS_transect_year, .keep_all = FALSE)
+
+    RLS_transect_year$Date <- as.Date(RLS_transect_year$Date)
+RLS_transect_year$Year <- format(RLS_transect_year$Date, "%Y")
+RLS_transect_year <- RLS_transect_year %>%
+  group_by(Site, Year) %>%
+   count(name="Transects")
+
+RLS_transect_year <- rename(RLS_transect_year, Total=Transects)
+ RLS_transect_year$Dataset <- 'RLS'
+ RLS_transect_year$Year <- as.numeric(RLS_transect_year$Year)   
+
+iNat_dives_yr <- iNat
+iNat_dives_yr$Year <- substr(iNat_dives_yr$Date, 0, 4)
+iNat_dives_yr$Year <- as.numeric(iNat_dives_yr$Year)   
+iNat_dives_yr <-  subset(iNat_dives_yr, Year>=2008 & Year <=2019)
+
+
+  iNat_dives_yr <-  iNat_dives_yr %>% 
+  distinct(Year, Site, User, .keep_all=TRUE)%>% 
+  group_by(Site, Year) %>% 
+summarise(Total = n())
+  
+  iNat_dives_yr$Dataset <- 'iNat'
+  
+  
+
+ effort_events <- rbind(iNat_dives_yr,RLS_transect_year )
+ 
+ggplot() +
+  theme_bw()+
+  theme(panel.grid = element_line(colour = "NA"))+
+    facet_wrap(~ Site, ncol = 2) +
+  geom_col(data=effort_events, aes(Year, Total, fill = Dataset, group = Dataset), size=1,position=position_dodge(preserve='single')) +
+  scale_fill_manual(values=c("#A2E7F2", "#F98C3E"),name  ="Dataset",guide='legend', labels=c("iNaturalist", "RLS"))+
+  labs(y= "Number of Events") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.4)) +
+ scale_y_continuous(breaks=seq(0, 30, 5), expand = c(0, 0), limits = c(0, 30)) +
+  scale_x_continuous(breaks=seq(2008, 2019, 1))
+
+```
+
+
+
+
+
+
+
