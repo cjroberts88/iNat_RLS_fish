@@ -1,4 +1,6 @@
 # iNat_RLS_fish - Biodivers. Conserv
+[![DOI](https://zenodo.org/badge/456691987.svg)](https://zenodo.org/badge/latestdoi/456691987)
+
 Code and data for Roberts et al. 2022. 
 
 Many cameras make light work: opportunistic photographs of rare species in iNaturalist complement structured surveys of reef fish to better understand species richness
